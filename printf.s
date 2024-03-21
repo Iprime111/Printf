@@ -430,7 +430,7 @@ FnPrintSingleSymbol:
     ret
 
 ; -------------------------------------------------------------------------------------------------
-; | FnWriteSyscall
+; | FnFlushBuffer
 ; | Args:   rax - Elements count
 ; | Assumes:    Nothing
 ; | Returns:    rax = [StreamBufferSize] = 0
