@@ -3,6 +3,41 @@ extern printf
 
 section .text
 
+%macro FnPrintSymbols 0
+    cmp rdx, 0
+    je %%PrintEnd                       ; check if there's nothing to print
+
+    push rdx
+    push rax
+    push rbx                            ; save registers
+
+    mov rax, [StreamBufferSize]         ; set rax = buffer size
+
+%%WriteSymbols:
+    cmp rax, StreamBufferCapacity
+    jb %%NotEnded                       ; check if buffer has ended
+
+    call FnFlushBuffer                  ; flush buffer if it's true
+
+%%NotEnded:
+    mov rbx, [rsi]
+    mov [StreamBuffer + rax], rbx       ; save byte to a buffer
+
+    inc rsi
+    inc rax                             ; move to the next element
+
+    dec rdx
+    jnz %%WriteSymbols                  ; check whether the string has ended
+
+    mov [StreamBufferSize], rax         ; save buffer size
+
+    pop rbx
+    pop rax
+    pop rdx                             ; restore registers
+
+%%PrintEnd:
+%endmacro
+
 _Z13printf_customPcz:
     push rbp                ; save rbp
     mov rbp, rsp            ; create stack frame
@@ -23,7 +58,7 @@ _Z13printf_customPcz:
 .SymbolLoop:
 
     call FnStrlenToPercent
-    call FnWriteSyscall     ; write string part without %'s
+    FnPrintSymbols          ; write string part without %'s
 
     cmp byte [rsi], 0x00
     jne .ReadModifier
@@ -32,13 +67,15 @@ _Z13printf_customPcz:
 .ReadModifier:
     inc rsi
 
-    cmp byte [rsi], '%'
-    je .PrintSingleSymbol   ; check if '%'
-    
+    cmp byte [rsi], 'z'
+    ja .PrintSingleSymbol
+
+    cmp byte [rsi], 'a'
+    jb .PrintSingleSymbol
+
     mov rax, 0
     mov al, [rsi]
-    sub rax, 'a'
-    shl rax, 3                          ; rax = ([rsi] - 'a') * 8
+    lea rax, [(rax - 'a') * 8]          ; rax = ([rsi] - 'a') * 8
     jmp [ModifiersJumpTable + rax]      ; jmp JumpTable [rax]
 
     jmp .SymbolLoop
@@ -115,6 +152,9 @@ _Z13printf_customPcz:
     jmp .SymbolLoop
 
 .return:
+    mov rax, [StreamBufferSize]
+    call FnFlushBuffer
+
     mov rdi, [rbp - 8]
     mov rsi, [rbp - 16]
     mov rdx, [rbp - 24]
@@ -152,7 +192,7 @@ FnPrintUnsignedToBuffer:
     push rbx
 
     mov rbx, 10
-    lea rdi, [PrintfBuffer + BufferSize - 1]        ; set buffer end
+    lea rdi, [PrintfBuffer + PrintfBufferSize - 1]        ; set buffer end
 
 .PrintDigit:
     xor rdx, rdx
@@ -185,9 +225,9 @@ FnPrintUnsigned:
     push rsi
 
     lea rsi, [rdi + 1]
-    mov rdx, PrintfBuffer + BufferSize - 1
+    mov rdx, PrintfBuffer + PrintfBufferSize - 1
     sub rdx, rdi
-    call FnWriteSyscall                         ; print symbols from buffer
+    FnPrintSymbols                              ; print symbols from buffer
 
     pop rsi
     inc rsi
@@ -224,9 +264,9 @@ FnPrintSigned:
     push rsi
 
     lea rsi, [rdi + 1]
-    mov rdx, PrintfBuffer + BufferSize - 1
+    mov rdx, PrintfBuffer + PrintfBufferSize - 1
     sub rdx, rdi
-    call FnWriteSyscall                         ; print symbols from buffer
+    FnPrintSymbols                              ; print symbols from buffer
 
     pop rsi
     inc rsi
@@ -290,7 +330,7 @@ FnPrintNumber:
     sub rdx, PrintfBuffer
     mov rsi, PrintfBuffer
 
-    call FnWriteSyscall     ; write number to stdout
+    FnPrintSymbols          ; write number to stdout
 
     pop rsi
     inc rsi
@@ -317,7 +357,7 @@ FnPrintString:
     mov rsi, rax
     call FnStrlen           ; get string length
     mov rsi, rax
-    call FnWriteSyscall     ; print string
+    FnPrintSymbols          ; print string
 
     pop rsi
     inc rsi
@@ -384,9 +424,30 @@ FnPrintSingleSymbol:
     push rdx
 
     mov rdx, 1              ; set length = 1
-    call FnWriteSyscall     ; make syscall
+    FnPrintSymbols          ; make syscall
 
     pop rdx
+    ret
+
+; -------------------------------------------------------------------------------------------------
+; | FnWriteSyscall
+; | Args:   rax - Elements count
+; | Assumes:    Nothing
+; | Returns:    rax = [StreamBufferSize] = 0
+; | Destroys:   Nothing
+; -------------------------------------------------------------------------------------------------
+FnFlushBuffer:
+    push rsi
+    push rdx
+
+    mov rdx, rax
+    mov rsi, StreamBuffer
+    call FnWriteSyscall
+    mov rax, 0
+    mov qword [StreamBufferSize], 0
+
+    pop rdx
+    pop rsi
     ret
 
 ; -------------------------------------------------------------------------------------------------
@@ -470,33 +531,25 @@ SavedRet dq 0
 PrintedSymbols dq 0
 Digits db "0123456789abcdef"
 
-BufferSize equ 64
-PrintfBuffer times BufferSize db 0
+StreamBufferCapacity equ 256
+StreamBufferSize dq 0
+StreamBuffer times StreamBufferCapacity db 0
+
+PrintfBufferSize equ 64
+PrintfBuffer times PrintfBufferSize db 0
 
 ModifiersJumpTable:
     dq _Z13printf_customPcz.PrintSingleSymbol   ; a
     dq _Z13printf_customPcz.PrintBinaryNumber   ; b  
     dq _Z13printf_customPcz.PrintChar           ; c
     dq _Z13printf_customPcz.PrintSigned         ; d
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; e
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; f
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; g
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; h
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; i
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; j
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; k
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; l
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; m
+    times 'm' - 'd' dq _Z13printf_customPcz.PrintSingleSymbol
     dq _Z13printf_customPcz.StorePrintedSymbols ; n
     dq _Z13printf_customPcz.PrintOctalNumber    ; o
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; p
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; q
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; r
+    times 'r' - 'o' dq _Z13printf_customPcz.PrintSingleSymbol
     dq _Z13printf_customPcz.PrintString         ; s
     dq _Z13printf_customPcz.PrintSingleSymbol   ; t
     dq _Z13printf_customPcz.PrintUnsigned       ; u
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; v
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; w
+    times 'w' - 'u' dq _Z13printf_customPcz.PrintSingleSymbol
     dq _Z13printf_customPcz.PrintHexNumber      ; x
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; y
-    dq _Z13printf_customPcz.PrintSingleSymbol   ; z
+    times 'z' - 'x' dq _Z13printf_customPcz.PrintSingleSymbol
