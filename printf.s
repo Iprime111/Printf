@@ -18,7 +18,7 @@ section .text
     jb %%NotEnded                       ; check if buffer has ended
 
     call FnFlushBuffer                  ; flush buffer if it's true
-
+comparator
 %%NotEnded:
     mov rbx, [rsi]
     mov [StreamBuffer + rax], rbx       ; save byte to a buffer
@@ -169,7 +169,7 @@ _Z13printf_customPcz:
     
     lea rsp, [rbp + 0x10]           ; clean stack from call consequences
     
-    call printf
+    call printf@PLT # TODO: read abt plt
     
     push qword [SavedRet]
     push qword [SavedRbp]
